@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>مدیریت موجودی کنسانتره (لوکال)</title>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jalaali-js@1.1.1/dist/jalaali.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root{--g:#1e5631;--g2:#2f6e42;--bg:#f9fefb;--ink:#2d3a2e;--muted:#6e8a6e}
+    *{box-sizing:border-box} body{font-family:Tahoma,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0}
+    header{background:var(--g);color:#b9f6ca;padding:14px 18px;font-weight:700;font-size:1.1rem}
+    main{padding:14px 18px}
+    .nav{display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px 0}
+    button{background:var(--g);border:none;color:#b9f6ca;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:.95rem}
+    button:hover{filter:brightness(.95)} .btn-s{background:var(--g2)}
+    input,select,textarea{padding:8px 10px;border:1px solid var(--g);border-radius:8px;background:#fff;color:var(--ink);width:100%}
+    label{font-weight:700;margin-bottom:6px;display:block}
+    form>div{margin-bottom:12px}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{border:1px solid var(--g);padding:8px 10px;text-align:right;vertical-align:top}
+    th{background:var(--g);color:#b9f6ca}
+    .row{display:flex;gap:10px;flex-wrap:wrap} .row>*{flex:1 1 200px}
+    .card{background:#fff;border-radius:10px;padding:14px;margin:10px 0;box-shadow:0 2px 10px rgba(0,0,0,.05);cursor:pointer}
+    .flex{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .muted{color:var(--muted);font-size:.9rem} .b{font-weight:700} .nowrap{white-space:nowrap}
+    .modal-b{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:9}
+    .modal{background:#fff;border-radius:12px;width:min(1000px,96vw);max-height:90vh;overflow:auto;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+    .danger{background:#b00020}
+  </style>
+</head>
+<body>
+  <header>مدیریت موجودی کنسانتره (ذخیره‌سازی در مرورگر)</header>
+
+  <div class="nav">
+    <button data-v="inventory">موجودی</button>
+    <button data-v="intake">ورودی</button>
+    <button data-v="outtake">خروجی</button>
+    <button data-v="tanks">مخازن</button>
+    <button data-v="reports">گزارشات</button>
+    <button id="backup" class="btn-s">خروجی پشتیبان JSON</button>
+    <input id="restore" type="file" accept=".json" style="display:none">
+    <button id="restoreBtn" class="btn-s">بازیابی از JSON</button>
+    <button id="resetAll" class="danger">حذف همه داده‌ها</button>
+  </div>
+
+  <main id="main"></main>
+
+  <div id="mb" class="modal-b">
+    <div class="modal">
+      <div class="flex" style="margin-bottom:10px">
+        <div id="kx-title" class="b">کاردکس</div>
+        <div>
+          <button id="kx-export" class="btn-s">خروجی اکسل</button>
+          <button id="kx-close" class="danger">بستن</button>
+        </div>
+      </div>
+      <div id="kx"></div>
+    </div>
+  </div>
+
+  <template id="tpl-inventory">
+    <div class="flex" style="margin:10px 0">
+      <div class="muted">برای دیدن کاردکس روی کارت‌ها کلیک کنید</div>
+      <button id="ex-inventory" class="btn-s">خروجی اکسل موجودی</button>
+    </div>
+    <div id="cards"></div>
+  </template>
+
+  <template id="tpl-tanks">
+    <form id="f-tank">
+      <div class="row">
+        <div><label>شماره مخزن</label><input name="tankNumber" required></div>
+        <div><label>ظرفیت (کیلوگرم)</label><input name="capacity" type="number" min="0"></div>
+      </div>
+      <div><label>توضیحات</label><textarea name="description" rows="2"></textarea></div>
+      <button type="submit">افزودن</button>
+    </form>
+    <div class="flex" style="margin-top:10px">
+      <div class="muted">برای حذف از دکمه کنار هر کارت استفاده کنید</div>
+      <button id="ex-tanks" class="btn-s">خروجی اکسل مخازن</button>
+    </div>
+    <div id="tank-list"></div>
+  </template>
+
+  <template id="tpl-intake">
+    <form id="f-intake">
+      <div class="row">
+        <div><label>تاریخ (شمسی)</label><input class="pdate" name="jdate" required></div>
+        <div><label>مخزن</label><select name="tankId" required></select></div>
+      </div>
+      <div class="row">
+        <div><label>نوع کنسانتره</label><input name="concentrateType" required></div>
+        <div><label>سال تولید</label><input name="productionYear" type="number" min="1300" max="1500"></div>
+      </div>
+      <div class="row">
+        <div><label>وزن خام (کیلوگرم)</label><input name="weightRaw" type="number" step="0.01" min="0" required></div>
+        <div><label>بریکس</label><input name="brix" type="number" step="0.01" min="0" max="100" required></div>
+        <div><label>وزن همگن</label><input name="weightHomogenized" type="number" step="0.01" min="0" placeholder="خالی=محاسبه اتومات"></div>
+      </div>
+      <div><label>یادداشت</label><textarea name="note" rows="2"></textarea></div>
+      <button type="submit">ثبت ورودی</button>
+    </form>
+    <div class="flex" style="margin-top:10px">
+      <span></span>
+      <button id="ex-intakes" class="btn-s">خروجی اکسل ورودی‌ها</button>
+    </div>
+    <div id="tbl-intake"></div>
+  </template>
+
+  <template id="tpl-outtake">
+    <form id="f-outtake">
+      <div class="row">
+        <div><label>تاریخ (شمسی)</label><input class="pdate" name="jdate" required></div>
+        <div><label>مخزن</label><select name="tankId" required></select></div>
+      </div>
+      <div class="row">
+        <div><label>مقصد</label><input name="destination" required></div>
+        <div><label>نوع کنسانتره</label><input name="concentrateType" required></div>
+        <div><label>سال تولید</label><input name="productionYear" type="number" min="1300" max="1500"></div>
+      </div>
+      <div class="row">
+        <div><label>وزن خام (کیلوگرم)</label><input name="weightRaw" type="number" step="0.01" min="0" required></div>
+        <div><label>بریکس</label><input name="brix" type="number" step="0.01" min="0" max="100" required></div>
+        <div><label>وزن همگن</label><input name="weightHomogenized" type="number" step="0.01" min="0" placeholder="خالی=محاسبه اتومات"></div>
+      </div>
+      <div><label>یادداشت</label><textarea name="note" rows="2"></textarea></div>
+      <button type="submit">ثبت خروجی</button>
+    </form>
+    <div class="flex" style="margin-top:10px">
+      <span></span>
+      <button id="ex-outtakes" class="btn-s">خروجی اکسل خروجی‌ها</button>
+    </div>
+    <div id="tbl-outtake"></div>
+  </template>
+
+  <template id="tpl-reports">
+    <div class="row">
+      <div><label>از تاریخ (شمسی)</label><input id="r-start" class="pdate"></div>
+      <div><label>تا تاریخ (شمسی)</label><input id="r-end" class="pdate"></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="r-inv">گزارش موجودی مخازن</button>
+      <button id="r-out">گزارش خروجی بر حسب نوع</button>
+      <button id="r-ex" class="btn-s" disabled>خروجی اکسل گزارش</button>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <span class="muted">ورود CSV</span>
+      <input type="file" id="imp-intake" accept=".csv">
+      <input type="file" id="imp-outtake" accept=".csv">
+    </div>
+    <div id="r-res" style="margin-top:10px"></div>
+  </template>
+
+  <script>
+  (function(){
+    const SKEY='conc_inv_v1';
+    const state = load() || {tanks:[], intakes:[], outtakes:[]};
+    let view='inventory', lastReport=null;
+
+    const main = document.getElementById('main');
+    const tpl = id=>document.getElementById(id).content.cloneNode(true);
+    const todayJ=()=>{const d=new Date();const j=jalaali.toJalaali(d.getFullYear(),d.getMonth()+1,d.getDate());return `${j.jy}/${String(j.jm).padStart(2,'0')}/${String(j.jd).padStart(2,'0')}`;}
+    const jToD=j=>{if(!j)return null;const [jy,jm,jd]=j.split(/[\/\-]/).map(Number);if(!jy||!jm||!jd)return null;const g=jalaali.toGregorian(jy,jm,jd);return new Date(g.gy,g.gm-1,g.gd);}
+    const cmpJ=(a,b)=>{const da=jToD(a),db=jToD(b);return (da&&db)?da-db:0;}
+    const uid=()=>Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
+    const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const calcH=(w,b,t)=>{w=+w||0;b=+b||0;const s=(t||'').toLowerCase();const base=(s.includes('سیب')||s.includes('خرما'))?70:65;return w*b/base;}
+    function save(){localStorage.setItem(SKEY, JSON.stringify(state));}
+    function load(){try{return JSON.parse(localStorage.getItem(SKEY)||'');}catch{ return null; }}
+
+    function initPickers(scope=document){$(scope).find('.pdate').each(function(){const $el=$(this);if($el.data('hasPicker'))return;$el.pDatepicker({format:'YYYY/MM/DD',initialValue:false,autoClose:true,calendar:{persian:{locale:'fa'}}});$el.data('hasPicker',true);if(!$el.val())$el.val(todayJ());});}
+
+    function render(){main.innerHTML=''; if(view==='tanks'){renderTanks();return;}
+      if(view==='intake'){renderIntake();return;}
+      if(view==='outtake'){renderOuttake();return;}
+      if(view==='reports'){renderReports();return;}
+      renderInventory();
+    }
+
+    function renderInventory(){
+      main.appendChild(tpl('tpl-inventory'));
+      const c = document.getElementById('cards');
+      if(!state.tanks.length){c.innerHTML='<div class="muted">مخزنی ثبت نشده</div>';return;}
+      state.tanks.forEach(t=>{
+        const inSum = state.intakes.filter(i=>i.tankId===t.id).reduce((s,r)=>s+(+r.weightHomogenized||0),0);
+        const outSum = state.outtakes.filter(o=>o.tankId===t.id).reduce((s,r)=>s+(+r.weightHomogenized||0),0);
+        const bal = inSum - outSum;
+        const types = [...new Set([
+          ...state.intakes.filter(i=>i.tankId===t.id).map(i=>i.concentrateType),
+          ...state.outtakes.filter(o=>o.tankId===t.id).map(o=>o.concentrateType)
+        ])].filter(Boolean).join(' ، ');
+        const card = document.createElement('div');
+        card.className='card';
+        card.innerHTML=`<div class="flex">
+          <div>
+            <div class="b">مخزن ${esc(t.tankNumber)}</div>
+            <div class="muted">${esc(t.description||'')}</div>
+            <div class="muted">کنسانتره‌ها: ${esc(types||'—')}</div>
+          </div>
+          <div style="text-align:left">
+            <div>وارد: ${inSum.toLocaleString()}</div>
+            <div>خارج: ${outSum.toLocaleString()}</div>
+            <div class="b">موجودی: ${bal.toLocaleString()}</div>
+          </div></div>`;
+        card.onclick=()=>openKardex(t);
+        c.appendChild(card);
+      });
+      document.getElementById('ex-inventory').onclick=exportInventory;
+    }
+
+    function renderTanks(){
+      main.appendChild(tpl('tpl-tanks'));
+      const form=document.getElementById('f-tank');
+      form.onsubmit=e=>{
+        e.preventDefault();
+        const f=new FormData(form);
+        const tank={id:uid(),tankNumber:String(f.get('tankNumber')).trim(),capacity:f.get('capacity')?+f.get('capacity'):null,description:String(f.get('description')||'').trim()};
+        if(!tank.tankNumber) return;
+        state.tanks.push(tank); save(); form.reset(); renderTanks();
+      };
+      const list=document.getElementById('tank-list');
+      if(!state.tanks.length){list.innerHTML='<div class="muted">مخزنی ثبت نشده</div>';}
+      state.tanks.slice().sort((a,b)=>String(a.tankNumber).localeCompare(String(b.tankNumber),'fa')).forEach(t=>{
+        const card=document.createElement('div'); card.className='card flex';
+        card.innerHTML=`<div>
+            <div class="b">مخزن ${esc(t.tankNumber)}</div>
+            <div class="muted">ظرفیت: ${t.capacity??'—'}</div>
+            <div class="muted">${esc(t.description||'')}</div>
+          </div>`;
+        const del=document.createElement('button'); del.textContent='حذف'; del.className='danger';
+        del.onclick=()=>{ if(confirm('حذف این مخزن؟')){ state.tanks=state.tanks.filter(x=>x.id!==t.id); state.intakes=state.intakes.filter(x=>x.tankId!==t.id); state.outtakes=state.outtakes.filter(x=>x.tankId!==t.id); save(); renderTanks(); } };
+        const right=document.createElement('div'); right.appendChild(del); card.appendChild(right); list.appendChild(card);
+      });
+      document.getElementById('ex-tanks').onclick=exportTanks;
+    }
+
+    function tankOptions(sel){ sel.innerHTML='<option value="">انتخاب مخزن</option>'; state.tanks.forEach(t=>{const o=document.createElement('option'); o.value=t.id; o.textContent=t.tankNumber; sel.appendChild(o);}); }
+
+    function renderIntake(){
+      main.appendChild(tpl('tpl-intake')); initPickers(main);
+      const form=document.getElementById('f-intake'); tankOptions(form.querySelector('select[name=tankId]'));
+      form.onsubmit=e=>{
+        e.preventDefault(); const f=new FormData(form);
+        const d={ id:uid(), jdate:String(f.get('jdate')||'').trim(), tankId:String(f.get('tankId')||''), concentrateType:String(f.get('concentrateType')||'').trim(),
+          productionYear: f.get('productionYear')?+f.get('productionYear'):null, weightRaw:+(f.get('weightRaw')||0), brix:+(f.get('brix')||0),
+          weightHomogenized: f.get('weightHomogenized')?+f.get('weightHomogenized'):null, note:String(f.get('note')||'').trim() };
+        if(!d.weightHomogenized) d.weightHomogenized=calcH(d.weightRaw,d.brix,d.concentrateType);
+        if(!d.jdate||!d.tankId||!d.concentrateType||!d.weightRaw||!d.brix) return;
+        state.intakes.push(d); save(); form.reset(); initPickers(form); tankOptions(form.querySelector('select[name=tankId]')); renderIntake();
+      };
+      table('tbl-intake', state.intakes, 'intake');
+      document.getElementById('ex-intakes').onclick=()=>exportIntakes(state.intakes);
+    }
+
+    function renderOuttake(){
+      main.appendChild(tpl('tpl-outtake')); initPickers(main);
+      const form=document.getElementById('f-outtake'); tankOptions(form.querySelector('select[name=tankId]'));
+      form.onsubmit=e=>{
+        e.preventDefault(); const f=new FormData(form);
+        const d={ id:uid(), jdate:String(f.get('jdate')||'').trim(), tankId:String(f.get('tankId')||''), destination:String(f.get('destination')||'').trim(),
+          concentrateType:String(f.get('concentrateType')||'').trim(), productionYear:f.get('productionYear')?+f.get('productionYear'):null,
+          weightRaw:+(f.get('weightRaw')||0), brix:+(f.get('brix')||0), weightHomogenized:f.get('weightHomogenized')?+f.get('weightHomogenized'):null,
+          note:String(f.get('note')||'').trim() };
+        if(!d.weightHomogenized) d.weightHomogenized=calcH(d.weightRaw,d.brix,d.concentrateType);
+        if(!d.jdate||!d.tankId||!d.destination||!d.concentrateType||!d.weightRaw||!d.brix) return;
+        state.outtakes.push(d); save(); form.reset(); initPickers(form); tankOptions(form.querySelector('select[name=tankId]')); renderOuttake();
+      };
+      table('tbl-outtake', state.outtakes, 'outtake');
+      document.getElementById('ex-outtakes').onclick=()=>exportOuttakes(state.outtakes);
+    }
+
+    function table(id,data,type){
+      const el=document.getElementById(id);
+      if(!data.length){el.innerHTML='<div class="muted">داده‌ای ثبت نشده</div>';return;}
+      let h='<table><thead><tr>';
+      if(type==='intake'||type==='outtake'){
+        h+='<th>تاریخ</th><th>مخزن</th><th>نوع</th><th>سال</th><th>وزن خام</th><th>بریکس</th><th>وزن همگن</th>';
+        if(type==='outtake') h+='<th>مقصد</th>'; h+='<th>یادداشت</th><th>حذف</th></tr></thead><tbody>';
+        data.slice().sort((a,b)=>cmpJ(a.jdate,b.jdate)).forEach(r=>{
+          const tn=state.tanks.find(t=>t.id===r.tankId)?.tankNumber||'—';
+          h+=`<tr>
+          <td class="nowrap">${esc(r.jdate||'')}</td>
+          <td>${esc(tn)}</td>
+          <td>${esc(r.concentrateType||'')}</td>
+          <td>${r.productionYear??''}</td>
+          <td>${r.weightRaw!=null?Number(r.weightRaw).toLocaleString():''}</td>
+          <td>${r.brix!=null?Number(r.brix).toLocaleString():''}</td>
+          <td>${r.weightHomogenized!=null?Number(r.weightHomogenized).toLocaleString():''}</td>
+          ${type==='outtake'?`<td>${esc(r.destination||'')}</td>`:''}
+          <td>${esc(r.note||'')}</td>
+          <td><button data-del="${r.id}" class="danger">حذف</button></td>
+          </tr>`;
+        });
+        h+='</tbody></table>';
+      }
+      el.innerHTML=h;
+      el.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ if(confirm('حذف رکورد؟')){ if(type==='intake'){state.intakes=state.intakes.filter(x=>x.id!==b.dataset.del);} else {state.outtakes=state.outtakes.filter(x=>x.id!==b.dataset.del);} save(); table(id,type==='intake'?state.intakes:state.outtakes,type);} });
+    }
+
+    function openKardex(t){
+      const moves=[];
+      state.intakes.filter(i=>i.tankId===t.id).forEach(i=>moves.push({jdate:i.jdate,type:'ورودی',concentrateType:i.concentrateType||'',productionYear:i.productionYear||'',weightRaw:i.weightRaw||'',brix:i.brix||'',in:i.weightHomogenized||0,out:'',destination:'',note:i.note||''}));
+      state.outtakes.filter(o=>o.tankId===t.id).forEach(o=>moves.push({jdate:o.jdate,type:'خروجی',concentrateType:o.concentrateType||'',productionYear:o.productionYear||'',weightRaw:o.weightRaw||'',brix:o.brix||'',in:'',out:o.weightHomogenized||0,destination:o.destination||'',note:o.note||''}));
+      moves.sort((a,b)=>cmpJ(a.jdate,b.jdate));
+      let bal=0; const rows=moves.map(m=>{ if(m.in) bal+=+m.in||0; if(m.out) bal-=+m.out||0;
+        return `<tr>
+          <td class="nowrap">${esc(m.jdate||'')}</td><td>${m.type}</td><td>${esc(m.concentrateType)}</td><td>${esc(String(m.productionYear||''))}</td>
+          <td>${m.weightRaw?Number(m.weightRaw).toLocaleString():''}</td><td>${m.brix?Number(m.brix).toLocaleString():''}</td>
+          <td>${m.in?Number(m.in).toLocaleString():''}</td><td>${m.out?Number(m.out).toLocaleString():''}</td>
+          <td>${esc(m.destination||'')}</td><td>${bal.toLocaleString()}</td><td>${esc(m.note||'')}</td></tr>`; }).join('');
+      const html=`<table><thead><tr>
+        <th>تاریخ</th><th>نوع سند</th><th>نوع کنسانتره</th><th>سال تولید</th>
+        <th>وزن خام</th><th>بریکس</th><th>ورود</th><th>خروج</th><th>مقصد</th><th>مانده</th><th>یادداشت</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+      document.getElementById('kx-title').textContent=`کاردکس مخزن ${t.tankNumber}`;
+      document.getElementById('kx').innerHTML=html;
+      document.getElementById('kx-export').onclick=()=>exportKardex(t,moves);
+      const mb=document.getElementById('mb'); mb.style.display='flex'; document.getElementById('kx-close').onclick=()=>mb.style.display='none'; mb.onclick=e=>{if(e.target.id==='mb') mb.style.display='none';}; document.onkeydown=e=>{if(e.key==='Escape') mb.style.display='none';};
+    }
+
+    function renderReports(){
+      main.appendChild(tpl('tpl-reports')); initPickers(main);
+      const s=document.getElementById('r-start'), e=document.getElementById('r-end');
+      if(!e.value) e.value=todayJ(); if(!s.value){const d=new Date();d.setDate(d.getDate()-30);const j=jalaali.toJalaali(d.getFullYear(),d.getMonth()+1,d.getDate());s.value=`${j.jy}/${String(j.jm).padStart(2,'0')}/${String(j.jd).padStart(2,'0')}`;}
+      document.getElementById('r-inv').onclick=()=>{document.getElementById('r-res').innerHTML=reportInventory(s.value,e.value); lastReport={kind:'inv',s:s.value,e:e.value}; document.getElementById('r-ex').disabled=false;};
+      document.getElementById('r-out').onclick=()=>{document.getElementById('r-res').innerHTML=reportOuttype(s.value,e.value); lastReport={kind:'out',s:s.value,e:e.value}; document.getElementById('r-ex').disabled=false;};
+      document.getElementById('r-ex').onclick=exportReport;
+      document.getElementById('imp-intake').onchange=ev=>{if(ev.target.files?.[0]) importCSV(ev.target.files[0],'intake');};
+      document.getElementById('imp-outtake').onchange=ev=>{if(ev.target.files?.[0]) importCSV(ev.target.files[0],'outtake');};
+    }
+
+    function reportInventory(sJ,eJ){
+      const s=jToD(sJ), e=jToD(eJ);
+      const inF=state.intakes.filter(i=>{const d=jToD(i.jdate);return d&&d>=s&&d<=e;});
+      const outF=state.outtakes.filter(o=>{const d=jToD(o.jdate);return d&&d>=s&&d<=e;});
+      const map={}; state.tanks.forEach(t=>map[t.id]={tank:t,in:0,out:0});
+      inF.forEach(i=>map[i.tankId]&&(map[i.tankId].in+=(+i.weightHomogenized||0)));
+      outF.forEach(o=>map[o.tankId]&&(map[o.tankId].out+=(+o.weightHomogenized||0)));
+      let h='<table><thead><tr><th>مخزن</th><th>وارد</th><th>خارج</th><th>موجودی</th><th>کنسانتره‌ها</th></tr></thead><tbody>';
+      Object.values(map).forEach(b=>{
+        const types=[...new Set([...inF.filter(i=>i.tankId===b.tank.id).map(i=>i.concentrateType),...outF.filter(o=>o.tankId===b.tank.id).map(o=>o.concentrateType)])].filter(Boolean).join(' ، ');
+        h+=`<tr><td>${esc(b.tank.tankNumber)}</td><td>${b.in.toLocaleString()}</td><td>${b.out.toLocaleString()}</td><td>${(b.in-b.out).toLocaleString()}</td><td>${esc(types||'—')}</td></tr>`;
+      }); h+='</tbody></table>'; return h;
+    }
+
+    function reportOuttype(sJ,eJ){
+      const s=jToD(sJ), e=jToD(eJ);
+      const outF=state.outtakes.filter(o=>{const d=jToD(o.jdate);return d&&d>=s&&d<=e;});
+      const by={}; outF.forEach(o=>{const k=o.concentrateType||'نامشخص'; by[k]=(by[k]||0)+(+o.weightHomogenized||0);});
+      let h='<table><thead><tr><th>نوع کنسانتره</th><th>مجموع خروجی (کیلوگرم)</th></tr></thead><tbody>';
+      Object.entries(by).forEach(([k,v])=>h+=`<tr><td>${esc(k)}</td><td>${v.toLocaleString()}</td></tr>`); h+='</tbody></table>'; return h;
+    }
+
+    function exportReport(){
+      if(!lastReport) return;
+      if(lastReport.kind==='inv'){
+        const sD=jToD(lastReport.s), eD=jToD(lastReport.e);
+        const inF=state.intakes.filter(i=>{const d=jToD(i.jdate);return d&&d>=sD&&d<=eD;});
+        const outF=state.outtakes.filter(o=>{const d=jToD(o.jdate);return d&&d>=sD&&d<=eD;});
+        const map={}; state.tanks.forEach(t=>map[t.id]={tank:t,in:0,out:0});
+        inF.forEach(i=>map[i.tankId]&&(map[i.tankId].in+=(+i.weightHomogenized||0)));
+        outF.forEach(o=>map[o.tankId]&&(map[o.tankId].out+=(+o.weightHomogenized||0)));
+        const rows=[['بازه',`${lastReport.s} تا ${lastReport.e}`],[],['مخزن','وارد','خارج','موجودی','کنسانتره‌ها']];
+        Object.values(map).forEach(b=>{
+          const types=[...new Set([...inF.filter(i=>i.tankId===b.tank.id).map(i=>i.concentrateType),...outF.filter(o=>o.tankId===b.tank.id).map(o=>o.concentrateType)])].filter(Boolean).join(' ، ');
+          rows.push([b.tank.tankNumber,b.in,b.out,b.in-b.out,types]);
+        });
+        xlsxDownload([['گزارش موجودی', X.utils.aoa_to_sheet(rows)]], `inventory_${lastReport.s}_${lastReport.e}`);
+      }else{
+        const sD=jToD(lastReport.s), eD=jToD(lastReport.e);
+        const outF=state.outtakes.filter(o=>{const d=jToD(o.jdate);return d&&d>=sD&&d<=eD;});
+        const by={}; outF.forEach(o=>{const k=o.concentrateType||'نامشخص'; by[k]=(by[k]||0)+(+o.weightHomogenized||0);});
+        const rows=[['بازه',`${lastReport.s} تا ${lastReport.e}`],[],['نوع کنسانتره','مجموع خروجی (کیلوگرم)']];
+        Object.entries(by).forEach(([k,v])=>rows.push([k,v]));
+        xlsxDownload([['گزارش خروجی', X.utils.aoa_to_sheet(rows)]], `outtake_${lastReport.s}_${lastReport.e}`);
+      }
+    }
+
+    function xlsxDownload(sheets,name){const wb=X.utils.book_new(); sheets.forEach(([t,s])=>X.utils.book_append_sheet(wb,s,t.slice(0,31))); X.writeFile(wb,`${name}.xlsx`);}
+    const X = XLSX;
+
+    function exportTanks(){const rows=[['شماره مخزن','ظرفیت','توضیحات']]; state.tanks.forEach(t=>rows.push([t.tankNumber,t.capacity??'',t.description??''])); xlsxDownload([['مخازن',X.utils.aoa_to_sheet(rows)]],'tanks');}
+    function exportIntakes(list){const rows=[['تاریخ','مخزن','نوع','سال','وزن خام','بریکس','وزن همگن','یادداشت']]; list.forEach(r=>{const tn=state.tanks.find(t=>t.id===r.tankId)?.tankNumber||'—'; rows.push([r.jdate||'',tn,r.concentrateType||'',r.productionYear||'',r.weightRaw||'',r.brix||'',r.weightHomogenized||'',r.note||'']);}); xlsxDownload([['ورودی‌ها',X.utils.aoa_to_sheet(rows)]],'intakes');}
+    function exportOuttakes(list){const rows=[['تاریخ','مخزن','مقصد','نوع','سال','وزن خام','بریکس','وزن همگن','یادداشت']]; list.forEach(r=>{const tn=state.tanks.find(t=>t.id===r.tankId)?.tankNumber||'—'; rows.push([r.jdate||'',tn,r.destination||'',r.concentrateType||'',r.productionYear||'',r.weightRaw||'',r.brix||'',r.weightHomogenized||'',r.note||'']);}); xlsxDownload([['خروجی‌ها',X.utils.aoa_to_sheet(rows)]],'outtakes');}
+    function exportInventory(){const rows=[['مخزن','وارد','خارج','موجودی','کنسانتره‌ها']]; state.tanks.forEach(t=>{const inS=state.intakes.filter(i=>i.tankId===t.id).reduce((s,r)=>s+(+r.weightHomogenized||0),0); const outS=state.outtakes.filter(o=>o.tankId===t.id).reduce((s,r)=>s+(+r.weightHomogenized||0),0); const types=[...new Set([...state.intakes.filter(i=>i.tankId===t.id).map(i=>i.concentrateType),...state.outtakes.filter(o=>o.tankId===t.id).map(o=>o.concentrateType)])].filter(Boolean).join(' ، '); rows.push([t.tankNumber,inS,outS,inS-outS,types]);}); xlsxDownload([['موجودی',X.utils.aoa_to_sheet(rows)]],'inventory');}
+    function exportKardex(t,moves){let bal=0; const rows=[[`کاردکس مخزن ${t.tankNumber}`],[],['تاریخ','نوع سند','نوع کنسانتره','سال تولید','وزن خام','بریکس','ورود','خروج','مقصد','مانده','یادداشت']]; moves.forEach(m=>{if(m.in) bal+=+m.in||0; if(m.out) bal-=+m.out||0; rows.push([m.jdate||'',m.type,m.concentrateType||'',m.productionYear||'',m.weightRaw||'',m.brix||'',m.in||'',m.out||'',m.destination||'',bal,m.note||'']);}); xlsxDownload([['کاردکس',X.utils.aoa_to_sheet(rows)]],`cardex_${t.tankNumber}`);}
+
+    function importCSV(file,type){
+      const r=new FileReader();
+      r.onload=async e=>{
+        const text=e.target.result; const lines=text.trim().split(/\r?\n/); if(lines.length<2) return;
+        const headers=lines[0].split(',').map(h=>h.trim());
+        const recs=lines.slice(1).map(l=>{const vals=l.split(',').map(v=>v.trim());const o={};headers.forEach((h,i)=>o[h]=vals[i]||'');return o;});
+        for(const r of recs){
+          if(type==='intake'){
+            const d={ id:uid(), jdate:r.jdate||r['تاریخ']||'', tankId: state.tanks.find(t=>t.tankNumber===(r.tankNumber||r['مخزن']))?.id||'',
+              concentrateType:r.concentrateType||r['نوع کنسانتره']||'', productionYear:r.productionYear?+r.productionYear:(r['سال تولید']?+r['سال تولید']:null),
+              weightRaw:r.weightRaw?+r.weightRaw:(r['وزن خام']?+r['وزن خام']:0), brix:r.brix?+r.brix:(r['بریکس']?+r['بریکس']:0),
+              weightHomogenized:r.weightHomogenized?+r.weightHomogenized:(r['وزن همگن']?+r['وزن همگن']:null), note:r.note||r['یادداشت']||'' };
+            if(!d.weightHomogenized) d.weightHomogenized=calcH(d.weightRaw,d.brix,d.concentrateType);
+            if(d.tankId) state.intakes.push(d);
+          }else{
+            const d={ id:uid(), jdate:r.jdate||r['تاریخ']||'', tankId: state.tanks.find(t=>t.tankNumber===(r.tankNumber||r['مخزن']))?.id||'',
+              destination:r.destination||r['مقصد']||'', concentrateType:r.concentrateType||r['نوع کنسانتره']||'',
+              productionYear:r.productionYear?+r.productionYear:(r['سال تولید']?+r['سال تولید']:null),
+              weightRaw:r.weightRaw?+r.weightRaw:(r['وزن خام']?+r['وزن خام']:0), brix:r.brix?+r.brix:(r['بریکس']?+r['بریکس']:0),
+              weightHomogenized:r.weightHomogenized?+r.weightHomogenized:(r['وزن همگن']?+r['وزن همگن']:null), note:r.note||r['یادداشت']||'' };
+            if(!d.weightHomogenized) d.weightHomogenized=calcH(d.weightRaw,d.brix,d.concentrateType);
+            if(d.tankId) state.outtakes.push(d);
+          }
+        }
+        save(); if(view==='reports') renderReports();
+      };
+      r.readAsText(file,'UTF-8');
+    }
+
+    function backupJSON(){
+      const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='concentrate-inventory-backup.json'; a.click(); URL.revokeObjectURL(a.href);
+    }
+    function restoreJSON(file){
+      const r=new FileReader(); r.onload=e=>{try{const data=JSON.parse(e.target.result); if(data&&data.tanks&&data.intakes&&data.outtakes){ state.tanks=data.tanks; state.intakes=data.intakes; state.outtakes=data.outtakes; save(); render(); alert('بازیابی شد'); }}catch{ alert('فایل نامعتبر است'); }}; r.readAsText(file,'UTF-8');
+    }
+
+    document.querySelectorAll('.nav button[data-v]').forEach(b=>b.onclick=()=>{view=b.dataset.v; render();});
+    document.getElementById('backup').onclick=backupJSON;
+    document.getElementById('restoreBtn').onclick=()=>document.getElementById('restore').click();
+    document.getElementById('restore').onchange=e=>{if(e.target.files?.[0]) restoreJSON(e.target.files[0]);};
+    document.getElementById('resetAll').onclick=()=>{ if(confirm('حذف تمام داده‌ها؟')){ localStorage.removeItem(SKEY); state.tanks=[];state.intakes=[];state.outtakes=[]; render(); } };
+
+    render();
+  })();
+  </script>
+</body>
+</html>
